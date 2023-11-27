@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request, abort
 from flask_sqlalchemy import SQLAlchemy 
 from sqlalchemy.exc import IntegrityError
 from marshmallow.validate import Length
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_marshmallow import Marshmallow
 from flask_bcrypt import Bcrypt
 from datetime import timedelta
@@ -97,7 +97,6 @@ def seed_db():
 
 
 @app.route('/auth/signup', methods=['POST'])   
-
 def auth_signup():
     try:
         user_fields = UserSchema(exclude=['id', 'admin']).load(request.json)
@@ -106,7 +105,7 @@ def auth_signup():
         user = User(
             email=user_fields['email'],
             password=bcrypt.generate_password_hash(user_fields['password']).decode('utf8'),
-            admin=False
+            admin=True
         )
         db.session.add(user)
         db.session.commit()
@@ -193,6 +192,39 @@ def get_actors():
     actors = db.session.scalars(stmt)
     return actors_schema.dump(actors)
 
+
+@app.route('/actors', methods=['POST'])
+@jwt_required()
+def add_actors():
+    actor_fields = actor_schema.load(request.json)
+    new_actor = Actor()
+    new_actor.first_name=actor_fields['first_name'],
+    new_actor.last_name=actor_fields['last_name'],
+    new_actor.gender=actor_fields['gender'],
+    new_actor.country=actor_fields['country']
+    db.session.add(new_actor)
+    db.session.commit()
+    return jsonify(actor_schema.dump(new_actor))
+
+@app.route('/actors/<int:id>', methods=['DELETE'])
+@jwt_required()
+def delete_actors(id):
+    user_id = get_jwt_identity()
+    stmt = db.select(User).filter_by(id=user_id)
+    user = db.session.scalar(stmt)
+    if not user:
+        abort(401, description="Invalid user")
+    if not user.admin:
+        abort(401, description="Not authorized to delete")
+    stmt = db.select(Actor).filter_by(id=id)
+    actor = db.session.scalar(stmt)
+    if not actor:
+        abort(404, description= "Actor doesn't exist")
+    db.session.delete(actor)
+    db.session.commit()
+    return "Successful deletion", 201 
+
+
 @app.route('/movies', methods=['GET'])
 def get_movies():
     stmt = db.select(Movie)
@@ -213,16 +245,26 @@ def add_movie():
     db.session.commit()
     return jsonify(movie_schema.dump(new_movie))
 
-@app.route('/movies/<movieId>', methods=['DELETE'])
+@app.route('/movies/<int:id>', methods=['DELETE'])
 @jwt_required()
-def delete_user(movieId):
-    #Parse incoming POST body through schema
-    #Parse incoming POST body through schema
-    Movie.query.filter_by(id=movieId).delete()
-    
-    if not movieId or not bcrypt.check_password_hash(user.password, user_fields["password"]):
-        return abort(401, description="Incorrect username and password")
-   
+def delete_movie(id):
+   #get the user id invoking get_jwt_identity
+    user_id = get_jwt_identity()
+    #Find it in the db
+    stmt = db.select(User).filter_by(id=user_id)
+    user = db.session.scalar(stmt)
+    #Make sure it is in the database
+    if not user:
+        return abort(401, description="Invalid user")
+    # Stop the request if the user is not an admin
+    if not user.admin:
+        return abort(401, description="Unauthorised user")
+    # find the card
+    stmt = db.select(Movie).filter_by(id=id)
+    movie = db.session.scalar(stmt)
+    if not movie:
+        return abort(400, description= "Movie doesn't exist")
+    db.session.delete(movie)
     db.session.commit()
 
     return "Successful deletion", 201 #return the n
